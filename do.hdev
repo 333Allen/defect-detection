@@ -1,0 +1,97 @@
+dev_update_off ()
+dev_close_window ()
+
+read_image (Image0, 'C:/Users/Allen/Desktop/halcon_image/gogogo/1.jpg')
+* read_image (Image0, 'C:/Users/Allen/Desktop/halcon_image/gogogo/2.jpg')
+* read_image (Image0, 'C:/Users/Allen/Desktop/halcon_image/gogogo/3.jpg')
+* read_image (Image0, 'C:/Users/Allen/Desktop/halcon_image/gogogo/4.jpg')
+* read_image (Image0, 'C:/Users/Allen/Desktop/halcon_image/gogogo/5.jpg')
+
+
+rgb1_to_gray (Image0, Image)
+get_image_size (Image, Width, Height)
+
+dev_open_window (0, 0, Width, Height, 'black', WindowHandle)
+set_display_font (WindowHandle, 150, 'mono', 'true', 'false')
+dev_set_draw ('fill')
+dev_set_line_width (3)
+dev_set_color ('red')
+
+*先不缩小
+* a:=1/4
+* Width:=Width0*a
+* Height:=Height0*a
+* zoom_image_factor (GrayImage, Image, a, a, 'bilinear')
+
+sigma1:=50
+* sigma2:=10
+gen_gauss_filter (ImageGauss, sigma1, sigma1, 0, 'n', 'dc_center', Width, Height)
+* gen_gauss_filter (ImageGauss1, sigma2, sigma2, 0, 'n', 'dc_center', Width, Height)
+* sub_image (ImageGauss1, ImageGauss1, ImageSub, 5, 0)
+
+*优化快速傅里叶变换速度
+optimize_fft_speed (Width, Height, 'standard')
+
+*空间域转频域
+fft_generic (Image, ImageFFT, 'to_freq', -1, 'none', 'dc_center', 'complex')
+
+* convol_fft (ImageFFT, ImageSub, ImageConvol)
+convol_fft (ImageFFT, ImageGauss, ImageConvol)
+*频域转空间域
+fft_generic (ImageConvol, ImageFFT1, 'from_freq', 1, 'none', 'dc_center', 'byte')
+sub_image (Image, ImageFFT1, ImageSub1, 5, 400)
+
+*-----方案一（第二张图不吃这套，效果不好，因为有数字挡着）-----*
+* median_image (ImageSub1, ImageMedian, 'circle', 1, 'mirrored')
+* emphasize (ImageMedian, ImageEmphasize, Width, Height, 1)
+* threshold (ImageEmphasize, Regions, 0, 135)
+* connection (Regions, ConnectedRegions)
+* select_shape (ConnectedRegions, SelectedRegions, 'area', 'and', 200, 50000)
+* count_obj (SelectedRegions, Number)
+*----------------------------------------------------------*
+
+
+*-----方案二（把图片上数字本身也当成缺陷，直接拿捏第二张图）-----*
+*预处理
+* gray_range_rect (ImageSub1, ImageResult, 10, 10)
+median_image (ImageSub1, ImageMedian, 'circle', 1, 'mirrored')
+emphasize (ImageMedian, ImageEmphasize, Width, Height, 1)
+gray_range_rect (ImageEmphasize, ImageResult, 5, 5)
+* emphasize (ImageMedian, ImageEmphasize, Width, Height, 1)
+*blob
+threshold (ImageResult, Regions, 240, 255)
+dilation_rectangle1 (Regions, RegionDilation, 1, 2)
+fill_up (RegionDilation, RegionFillUp)
+erosion_rectangle1 (RegionFillUp, RegionErosion, 1, 2)
+connection (RegionErosion, ConnectedRegions)
+select_shape (ConnectedRegions, SelectedRegions, 'area', 'and', 300, 50000)
+count_obj (SelectedRegions, Number)
+
+* cooc_feature_image (SelectedRegions, ImageEmphasize, 6, 0, Energy, Correlation, Homogeneity, Contrast)
+
+*把断开的缺陷连起来
+union1 (SelectedRegions, RegionUnion)
+closing_circle (RegionUnion, RegionClosing, 5)
+connection (RegionClosing, ConnectedRegions1)
+* select_shape (ConnectedRegions1, SelectedRegions1, 'area', 'and', 100, 50000)
+count_obj (ConnectedRegions1, Number1)
+area_center (ConnectedRegions1, Area, Row, Column)
+
+*-----------------------------------------------------------*
+
+*展示图片
+dev_display (Image0)
+Num:=|Area|
+if (Number)
+*     gen_circle_contour_xld (ContCircle, Row, Column, gen_tuple_const(Number,30), gen_tuple_const(Number,0), gen_tuple_const(Number,rad(360)), 'positive', 1)
+    ResultMessage := ['Not OK',Number + ' defect(s) found']
+    Color := ['red', 'black']
+    dev_display (ConnectedRegions1)
+else
+    ResultMessage := 'OK'
+    Color := 'forest green'
+endif
+disp_message (WindowHandle, ResultMessage, 'window', 12, 12, Color, 'true')
+
+
+
